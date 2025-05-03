@@ -38,4 +38,8 @@ bot_error.log
 .idea/
 .vscode/
 *.swp
-*.swo 
+*.swo
+
+# Environment variables
+.env
+.env.local 

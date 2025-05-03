@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import asyncio
 from telegram import Bot
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import logging
 import sys
 import os
@@ -27,41 +26,26 @@ async def send_notification(message=None):
         bot = Bot(token=TOKEN)
         await bot.send_message(chat_id=CHAT_ID, text=message)
         logger.info(f"Notification sent successfully")
+        return True
     except Exception as e:
         logger.error(f"Error sending notification: {e}")
+        return False
 
 async def main():
-    """Main function to set up and start the scheduler."""
+    """Main function to send a notification."""
     if TOKEN == 'YOUR_BOT_TOKEN' or CHAT_ID == 'YOUR_CHAT_ID':
         logger.error("Please set your bot token and chat ID in the script!")
         sys.exit(1)
         
-    logger.info("Starting the notification bot")
+    logger.info("Running scheduled notification task")
     
-    # Create a scheduler
-    scheduler = AsyncIOScheduler()
+    # Send notification
+    result = await send_notification("Scheduled notification from PythonAnywhere")
     
-    # Schedule the notification to run every hour
-    scheduler.add_job(send_notification, 'interval', hours=1)
-    
-    # You can add more scheduled notifications with different intervals
-    # scheduler.add_job(lambda: asyncio.create_task(send_notification("Daily reminder!")), 'cron', hour=9, minute=0)
-    
-    try:
-        # Send an initial notification
-        await send_notification("Bot started! You will receive notifications based on the schedule.")
-        
-        # Start the scheduler
-        scheduler.start()
-        
-        # Keep the program running
-        while True:
-            await asyncio.sleep(1)
-            
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Bot stopped!")
-    finally:
-        scheduler.shutdown()
+    if result:
+        logger.info("Notification task completed successfully")
+    else:
+        logger.error("Notification task failed")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main()) 
