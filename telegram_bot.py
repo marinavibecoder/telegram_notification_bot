@@ -26,7 +26,10 @@ async def send_notification(message=None):
     """Send a notification message to the specified chat."""
     try:
         if message is None:
-            message = f"Scheduled notification at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            # Customize your default notification message here
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            message = f"🔔 Your hourly reminder! Time: {current_time}\n\n" \
+                     f"Hope you're having a productive day! 💪"
             
         bot = Bot(token=TOKEN)
         await bot.send_message(chat_id=CHAT_ID, text=message)
@@ -48,12 +51,15 @@ async def main():
     # Schedule the notification to run every hour
     scheduler.add_job(send_notification, 'interval', hours=1)
     
-    # You can add more scheduled notifications with different intervals
-    # scheduler.add_job(lambda: asyncio.create_task(send_notification("Daily reminder!")), 'cron', hour=9, minute=0)
+    # You can add more scheduled notifications with different intervals and messages
+    # scheduler.add_job(lambda: asyncio.create_task(send_notification("⏰ Time for your daily task check!")), 'cron', hour=9, minute=0)
+    # scheduler.add_job(lambda: asyncio.create_task(send_notification("🍽️ Don't forget lunch break!")), 'cron', hour=12, minute=0)
+    # scheduler.add_job(lambda: asyncio.create_task(send_notification("🧘 Time for a short meditation break")), 'cron', hour=15, minute=0)
+    # scheduler.add_job(lambda: asyncio.create_task(send_notification("📝 Remember to wrap up your daily tasks")), 'cron', hour=17, minute=0)
     
     try:
         # Send an initial notification
-        await send_notification("Bot started! You will receive notifications based on the schedule.")
+        await send_notification("🚀 Bot started! You will receive notifications based on the schedule.")
         
         # Start the scheduler
         scheduler.start()

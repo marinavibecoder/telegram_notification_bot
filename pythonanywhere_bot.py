@@ -25,7 +25,29 @@ async def send_notification(message=None):
     """Send a notification message to the specified chat."""
     try:
         if message is None:
-            message = f"Scheduled notification at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            # Get current time and day of week
+            now = datetime.now()
+            current_time = now.strftime('%Y-%m-%d %H:%M:%S')
+            day_of_week = now.strftime('%A')
+            
+            # Customize message based on time of day
+            hour = now.hour
+            
+            if hour < 12:
+                greeting = "Good morning! ☀️"
+                message_type = "Start your day with positivity!"
+            elif hour < 17:
+                greeting = "Good afternoon! 🌤️"
+                message_type = "Keep going strong!"
+            else:
+                greeting = "Good evening! 🌙"
+                message_type = "Wind down and relax."
+                
+            # Create a personalized message
+            message = f"{greeting}\n\n" \
+                      f"📅 {day_of_week}, {current_time}\n" \
+                      f"📝 {message_type}\n\n" \
+                      f"This is your scheduled reminder from PythonAnywhere."
             
         bot = Bot(token=TOKEN)
         await bot.send_message(chat_id=CHAT_ID, text=message)
@@ -44,7 +66,7 @@ async def main():
     logger.info("Running scheduled notification task")
     
     # Send notification
-    result = await send_notification("Scheduled notification from PythonAnywhere")
+    result = await send_notification()  # Using the default, time-based message
     
     if result:
         logger.info("Notification task completed successfully")
