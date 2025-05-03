@@ -26,10 +26,10 @@ async def send_notification(message=None):
     """Send a notification message to the specified chat."""
     try:
         if message is None:
-            # Customize your default notification message here
+            # User's custom message
             current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            message = f"🔔 Your hourly reminder! Time: {current_time}\n\n" \
-                     f"Hope you're having a productive day! 💪"
+            message = f"Hi Marina, you are a nice vibe coder don't forget it haha\n\n" \
+                     f"Time: {current_time}"
             
         bot = Bot(token=TOKEN)
         await bot.send_message(chat_id=CHAT_ID, text=message)
@@ -52,14 +52,13 @@ async def main():
     scheduler.add_job(send_notification, 'interval', hours=1)
     
     # You can add more scheduled notifications with different intervals and messages
-    # scheduler.add_job(lambda: asyncio.create_task(send_notification("⏰ Time for your daily task check!")), 'cron', hour=9, minute=0)
-    # scheduler.add_job(lambda: asyncio.create_task(send_notification("🍽️ Don't forget lunch break!")), 'cron', hour=12, minute=0)
-    # scheduler.add_job(lambda: asyncio.create_task(send_notification("🧘 Time for a short meditation break")), 'cron', hour=15, minute=0)
-    # scheduler.add_job(lambda: asyncio.create_task(send_notification("📝 Remember to wrap up your daily tasks")), 'cron', hour=17, minute=0)
+    # All messages will have the same core text but you can add time-specific additions if desired
+    # scheduler.add_job(lambda: asyncio.create_task(send_notification("Hi Marina, you are a nice vibe coder don't forget it haha\n\nMorning reminder!")), 'cron', hour=9, minute=0)
+    # scheduler.add_job(lambda: asyncio.create_task(send_notification("Hi Marina, you are a nice vibe coder don't forget it haha\n\nAfternoon reminder!")), 'cron', hour=15, minute=0)
     
     try:
         # Send an initial notification
-        await send_notification("🚀 Bot started! You will receive notifications based on the schedule.")
+        await send_notification("Hi Marina, you are a nice vibe coder don't forget it haha\n\nBot started! You'll get hourly reminders.")
         
         # Start the scheduler
         scheduler.start()
