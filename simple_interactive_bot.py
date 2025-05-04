@@ -8,6 +8,7 @@ import time
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from dotenv import load_dotenv
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Load environment variables from .env file
 load_dotenv()
@@ -25,6 +26,10 @@ CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '105453726')
 
 # Config file path
 CONFIG_FILE = 'config.json'
+
+# Global variables for application and scheduler
+application = None
+scheduler = None
 
 def load_config():
     """Load configuration from config file."""
@@ -128,6 +133,9 @@ async def change_frequency(update: Update, context: ContextTypes.DEFAULT_TYPE):
         config["last_updated"] = datetime.now().isoformat()
         save_config(config)
         
+        # Update scheduler
+        update_scheduler_jobs()
+        
         await update.message.reply_text(
             f"Schedule '{schedule_name}' updated to every {minutes} minutes.\n"
             f"Next notification will arrive in {minutes} minutes."
@@ -185,6 +193,9 @@ async def create_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         config["last_updated"] = datetime.now().isoformat()
         save_config(config)
         
+        # Update scheduler
+        update_scheduler_jobs()
+        
         await update.message.reply_text(
             f"New schedule '{schedule_name}' created with {minutes} minute frequency.\n"
             f"Message: \"{custom_message}\""
@@ -238,6 +249,9 @@ async def delete_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         deleted_schedule = config["schedules"].pop(schedule_name)
         config["last_updated"] = datetime.now().isoformat()
         save_config(config)
+        
+        # Update scheduler
+        update_scheduler_jobs()
         
         await update.message.reply_text(
             f"Schedule '{schedule_name}' has been deleted."
@@ -387,6 +401,9 @@ async def refresh_timer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         config["last_updated"] = now.isoformat()
         save_config(config)
         
+        # Update scheduler
+        update_scheduler_jobs()
+        
         # Get the schedule frequency
         frequency_minutes = config["schedules"][schedule_name]["frequency_minutes"]
         next_notification = now + timedelta(minutes=frequency_minutes)
@@ -473,8 +490,79 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/send [schedule_name] - Send a test notification from a schedule"
     )
 
+async def send_scheduled_notification(bot, schedule_name):
+    """Send a notification for a specific schedule."""
+    try:
+        if schedule_name not in config["schedules"]:
+            logger.error(f"Schedule '{schedule_name}' not found in config!")
+            return
+
+        # Get schedule info
+        schedule = config["schedules"][schedule_name]
+        logger.info(f"Sending scheduled notification for '{schedule_name}' (every {schedule['frequency_minutes']} minutes)")
+            
+        # Get schedule-specific message
+        message = schedule["message"]
+        
+        # Add time to message
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        full_message = f"{message}\n\nTime: {current_time}\n(From schedule: {schedule_name})"
+        
+        # Send the message
+        await bot.send_message(chat_id=CHAT_ID, text=full_message)
+        logger.info(f"Scheduled notification for '{schedule_name}' sent successfully")
+        
+        # Update the last_updated timestamp
+        config["schedules"][schedule_name]["last_updated"] = datetime.now().isoformat()
+        config["last_updated"] = datetime.now().isoformat()
+        save_config(config)
+        
+    except Exception as e:
+        logger.error(f"Error sending scheduled notification for '{schedule_name}': {e}")
+
+def update_scheduler_jobs():
+    """Update scheduler jobs based on the current config."""
+    global scheduler
+    
+    try:
+        # Remove all existing jobs
+        for job in scheduler.get_jobs():
+            job.remove()
+            
+        # Add a job for each schedule
+        for schedule_name, schedule in config["schedules"].items():
+            frequency_minutes = schedule["frequency_minutes"]
+            
+            # Calculate next run time based on last_updated
+            last_updated = datetime.fromisoformat(schedule["last_updated"])
+            now = datetime.now()
+            minutes_since_update = (now - last_updated).total_seconds() / 60
+            minutes_until_next = frequency_minutes - (minutes_since_update % frequency_minutes)
+            
+            # If minutes_until_next is very small, add a minute to avoid immediate trigger
+            if minutes_until_next < 1:
+                minutes_until_next = 1
+                
+            next_run = now + timedelta(minutes=minutes_until_next)
+            
+            logger.info(f"Scheduling '{schedule_name}' to run every {frequency_minutes} minutes (next run at {next_run.strftime('%H:%M:%S')})")
+            
+            # Add job with the calculated next run time
+            scheduler.add_job(
+                send_scheduled_notification,
+                'interval',
+                minutes=frequency_minutes,
+                next_run_time=next_run,
+                id=f'schedule_{schedule_name}',
+                args=[application.bot, schedule_name]
+            )
+    except Exception as e:
+        logger.error(f"Error updating scheduler jobs: {e}")
+
 def main():
     """Start the bot."""
+    global application, scheduler
+    
     # Create the Application
     application = Application.builder().token(TOKEN).build()
 
@@ -494,6 +582,15 @@ def main():
     
     # Add unknown command handler - this must be added last!
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
+
+    # Create and start the scheduler
+    scheduler = AsyncIOScheduler()
+    scheduler.start()
+    
+    # Initialize scheduler jobs
+    update_scheduler_jobs()
+    
+    logger.info("Bot started with scheduler for all configured schedules")
 
     # Run the bot until the user presses Ctrl-C
     application.run_polling(allowed_updates=Update.ALL_TYPES)
