@@ -1,4 +1,10 @@
 {
-    "frequency_minutes": 60,
-    "last_updated": "2025-05-04T12:41:37"
-} 
+    "schedules": {
+        "basic": {
+            "frequency_minutes": 40,
+            "last_updated": "2025-05-04T13:00:40.694527",
+            "message": "Hi Marina, you are a nice vibe coder don't forget it haha"
+        }
+    },
+    "last_updated": "2025-05-04T13:00:40.694527"
+}
