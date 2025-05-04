@@ -57,9 +57,8 @@ def save_config(config):
 
 # Load initial config
 config = load_config()
-scheduler = None
 
-async def send_notification(context=None):
+async def send_notification(bot):
     """Send a notification message to the specified chat."""
     try:
         # User's custom message
@@ -67,14 +66,7 @@ async def send_notification(context=None):
         message = f"Hi Marina, you are a nice vibe coder don't forget it haha\n\n" \
                  f"Time: {current_time}"
         
-        if context:
-            # Called from the scheduler
-            await context.bot.send_message(chat_id=CHAT_ID, text=message)
-        else:
-            # Called directly
-            bot = Bot(token=TOKEN)
-            await bot.send_message(chat_id=CHAT_ID, text=message)
-            
+        await bot.send_message(chat_id=CHAT_ID, text=message)
         logger.info(f"Notification sent successfully")
     except Exception as e:
         logger.error(f"Error sending notification: {e}")
@@ -121,10 +113,11 @@ async def change_frequency(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
         # Add new job with updated frequency
         scheduler.add_job(
-            lambda: asyncio.create_task(send_notification(context)), 
+            send_notification_job, 
             'interval', 
             minutes=minutes,
-            id='notification_job'
+            id='notification_job',
+            args=[context.bot]
         )
         
         await update.message.reply_text(
@@ -161,6 +154,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Current notification frequency: Every {config['frequency_minutes']} minutes"
         )
 
+async def send_notification_job(bot):
+    """Wrapper function for the scheduler to call send_notification."""
+    await send_notification(bot)
+
 async def main():
     """Start the bot."""
     global scheduler
@@ -188,19 +185,25 @@ async def main():
     
     # Schedule notification job with current frequency
     scheduler.add_job(
-        lambda: asyncio.create_task(send_notification(application)), 
+        send_notification_job, 
         'interval', 
         minutes=config['frequency_minutes'],
-        id='notification_job'
+        id='notification_job',
+        args=[application.bot]
     )
     
     # Send initial notification
-    await send_notification(application)
+    await send_notification(application.bot)
     
     logger.info(f"Bot started with notification frequency: {config['frequency_minutes']} minutes")
     
-    # Run the bot until the user presses Ctrl-C
+    # Run the bot
     await application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Bot stopped by user!")
+    except Exception as e:
+        logger.error(f"Bot error: {e}")
