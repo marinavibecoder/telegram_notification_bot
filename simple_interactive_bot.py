@@ -2,7 +2,7 @@
 import os
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 
 from telegram import Update
@@ -87,6 +87,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"/change [schedule_name] [minutes] - Update frequency of a schedule\n"
         f"/create [schedule_name] [minutes] - Create a new schedule\n"
         f"/list - List all schedules\n"
+        f"/all - Show detailed timing for all schedules\n"
         f"/send [schedule_name] - Send a test notification from a schedule"
     )
 
@@ -218,6 +219,43 @@ async def list_schedules(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error listing schedules: {e}")
         await update.message.reply_text(f"Error listing schedules: {e}")
 
+async def all_schedules(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show detailed timing information for all schedules."""
+    try:
+        if not config["schedules"]:
+            await update.message.reply_text("No schedules found.")
+            return
+            
+        now = datetime.now()
+        schedules_text = "📋 All schedule details:\n\n"
+        
+        for name, schedule in config["schedules"].items():
+            # Calculate timing information
+            frequency_minutes = schedule["frequency_minutes"]
+            last_updated = datetime.fromisoformat(schedule["last_updated"])
+            
+            # Calculate next notification time
+            minutes_since_update = (now - last_updated).total_seconds() / 60
+            minutes_until_next = frequency_minutes - (minutes_since_update % frequency_minutes)
+            next_notification = now + timedelta(minutes=minutes_until_next)
+            
+            # Calculate how many times it runs per day
+            runs_per_day = 24 * 60 / frequency_minutes
+            
+            # Format the message
+            schedules_text += f"🔔 *{name}*\n"
+            schedules_text += f"  • Frequency: every *{frequency_minutes} minutes*\n"
+            schedules_text += f"  • Next notification: *{next_notification.strftime('%H:%M:%S')}* "
+            schedules_text += f"(in {int(minutes_until_next)} minutes)\n"
+            schedules_text += f"  • Notifications per day: *{runs_per_day:.1f}*\n"
+            schedules_text += f"  • Message: \"{schedule['message']}\"\n\n"
+        
+        await update.message.reply_text(schedules_text)
+        
+    except Exception as e:
+        logger.error(f"Error showing all schedules: {e}")
+        await update.message.reply_text(f"Error showing all schedules: {e}")
+
 async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a test message from a specific schedule."""
     try:
@@ -257,6 +295,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/change [schedule_name] [minutes] - Update frequency of a schedule\n"
         "/create [schedule_name] [minutes] - Create a new schedule\n"
         "/list - List all schedules\n"
+        "/all - Show detailed timing for all schedules\n"
         "/send [schedule_name] - Send a test notification from a schedule"
     )
 
@@ -270,6 +309,7 @@ def main():
     application.add_handler(CommandHandler("change", change_frequency))
     application.add_handler(CommandHandler("create", create_schedule))
     application.add_handler(CommandHandler("list", list_schedules))
+    application.add_handler(CommandHandler("all", all_schedules))
     application.add_handler(CommandHandler("send", send_message))
     
     # Add message handler for non-command messages
