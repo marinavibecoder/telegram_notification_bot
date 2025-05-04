@@ -490,7 +490,7 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/send [schedule_name] - Send a test notification from a schedule"
     )
 
-async def send_scheduled_notification(bot, schedule_name):
+async def send_scheduled_notification(schedule_name):
     """Send a notification for a specific schedule."""
     try:
         if schedule_name not in config["schedules"]:
@@ -509,7 +509,7 @@ async def send_scheduled_notification(bot, schedule_name):
         full_message = f"{message}\n\nTime: {current_time}\n(From schedule: {schedule_name})"
         
         # Send the message
-        await bot.send_message(chat_id=CHAT_ID, text=full_message)
+        await application.bot.send_message(chat_id=CHAT_ID, text=full_message)
         logger.info(f"Scheduled notification for '{schedule_name}' sent successfully")
         
         # Update the last_updated timestamp
@@ -554,7 +554,7 @@ def update_scheduler_jobs():
                 minutes=frequency_minutes,
                 next_run_time=next_run,
                 id=f'schedule_{schedule_name}',
-                args=[application.bot, schedule_name]
+                args=[schedule_name]
             )
     except Exception as e:
         logger.error(f"Error updating scheduler jobs: {e}")
@@ -583,12 +583,14 @@ def main():
     # Add unknown command handler - this must be added last!
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
 
-    # Create and start the scheduler
+    # Create scheduler with the event loop from the application
     scheduler = AsyncIOScheduler()
-    scheduler.start()
     
     # Initialize scheduler jobs
     update_scheduler_jobs()
+    
+    # Start the scheduler
+    scheduler.start()
     
     logger.info("Bot started with scheduler for all configured schedules")
 
@@ -596,4 +598,13 @@ def main():
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
-    main() 
+    try:
+        main()
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Bot stopped by user!")
+        if scheduler and scheduler.running:
+            scheduler.shutdown()
+    except Exception as e:
+        logger.error(f"Bot error: {e}")
+        if scheduler and scheduler.running:
+            scheduler.shutdown() 
