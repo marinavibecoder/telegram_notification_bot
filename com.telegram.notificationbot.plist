@@ -7,7 +7,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/Library/Frameworks/Python.framework/Versions/3.13/bin/python3</string>
-        <string>/Users/marinamalykh/Documents/telegram_notification_bot/telegram_bot.py</string>
+        <string>/Users/marinamalykh/Documents/telegram_notification_bot/simple_interactive_bot.py</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
