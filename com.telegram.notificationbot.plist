@@ -10,9 +10,9 @@
         <string>/Users/marinamalykh/Documents/telegram_notification_bot/simple_interactive_bot.py</string>
     </array>
     <key>RunAtLoad</key>
-    <true/>
+    <false/>
     <key>KeepAlive</key>
-    <true/>
+    <false/>
     <key>StandardOutPath</key>
     <string>/Users/marinamalykh/Documents/telegram_notification_bot/bot_output.log</string>
     <key>StandardErrorPath</key>
