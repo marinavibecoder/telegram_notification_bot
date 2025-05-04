@@ -354,6 +354,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/send [schedule_name] - Send a test notification from a schedule"
     )
 
+async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Respond to unknown commands."""
+    command = update.message.text.split()[0]
+    await update.message.reply_text(
+        f"Sorry, I don't understand the command '{command}'.\n\n"
+        "Here are the available commands:\n"
+        "/start - Show help information and current schedules\n"
+        "/change [schedule_name] [minutes] - Update frequency of a schedule\n"
+        "/create [schedule_name] [minutes] - Create a new schedule\n"
+        "/delete [schedule_name] - Delete a schedule\n"
+        "/list - List all schedules with their messages\n"
+        "/all - Show detailed timing information for all schedules\n"
+        "/send [schedule_name] - Send a test notification from a schedule"
+    )
+
 def main():
     """Start the bot."""
     # Create the Application
@@ -370,6 +385,9 @@ def main():
     
     # Add message handler for non-command messages
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    # Add unknown command handler - this must be added last!
+    application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
 
     # Run the bot until the user presses Ctrl-C
     application.run_polling(allowed_updates=Update.ALL_TYPES)
