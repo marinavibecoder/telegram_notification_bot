@@ -90,6 +90,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"/list - List all schedules\n"
         f"/all - Show detailed timing for all schedules\n"
         f"/timer [schedule_name] - Show time until next notification\n"
+        f"/refresh [schedule_name] - Reset timer to start from now\n"
         f"/send [schedule_name] - Send a test notification from a schedule"
     )
 
@@ -356,6 +357,59 @@ async def timer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error showing timer: {e}")
         await update.message.reply_text(f"Error showing timer: {e}")
 
+async def refresh_timer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Reset a schedule's timer to start from now."""
+    global config
+    
+    try:
+        # Check if schedule name is provided
+        if not context.args:
+            await update.message.reply_text(
+                "Please provide a schedule name to refresh.\n"
+                "Example: /refresh basic"
+            )
+            return
+            
+        # Get the schedule name
+        schedule_name = " ".join(context.args).lower()
+        
+        # Check if schedule exists
+        if schedule_name not in config["schedules"]:
+            await update.message.reply_text(
+                f"Schedule '{schedule_name}' not found. Available schedules:\n" +
+                "\n".join([f"• {name}" for name in config["schedules"].keys()])
+            )
+            return
+            
+        # Update the last_updated timestamp to now
+        now = datetime.now()
+        config["schedules"][schedule_name]["last_updated"] = now.isoformat()
+        config["last_updated"] = now.isoformat()
+        save_config(config)
+        
+        # Get the schedule frequency
+        frequency_minutes = config["schedules"][schedule_name]["frequency_minutes"]
+        next_notification = now + timedelta(minutes=frequency_minutes)
+        
+        # Format the message
+        message = f"🔄 Timer for '{schedule_name}' has been refreshed!\n\n"
+        message += f"• Next notification will be in {frequency_minutes} minutes\n"
+        message += f"• Exact time: {next_notification.strftime('%H:%M:%S')}"
+        
+        await update.message.reply_text(message)
+        
+        # Also send a notification to the original chat ID
+        await context.bot.send_message(
+            chat_id=CHAT_ID,
+            text=f"Schedule '{schedule_name}' timer has been refreshed. Next notification in {frequency_minutes} minutes."
+        )
+        
+        logger.info(f"Schedule '{schedule_name}' timer has been refreshed")
+        
+    except Exception as e:
+        logger.error(f"Error refreshing timer: {e}")
+        await update.message.reply_text(f"Error refreshing timer: {e}")
+
 async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a test message from a specific schedule."""
     try:
@@ -398,6 +452,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/list - List all schedules\n"
         "/all - Show detailed timing for all schedules\n"
         "/timer [schedule_name] - Show time until next notification\n"
+        "/refresh [schedule_name] - Reset timer to start from now\n"
         "/send [schedule_name] - Send a test notification from a schedule"
     )
 
@@ -414,6 +469,7 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/list - List all schedules with their messages\n"
         "/all - Show detailed timing information for all schedules\n"
         "/timer [schedule_name] - Show time until next notification\n"
+        "/refresh [schedule_name] - Reset timer to start from now\n"
         "/send [schedule_name] - Send a test notification from a schedule"
     )
 
@@ -431,6 +487,7 @@ def main():
     application.add_handler(CommandHandler("all", all_schedules))
     application.add_handler(CommandHandler("send", send_message))
     application.add_handler(CommandHandler("timer", timer_command))
+    application.add_handler(CommandHandler("refresh", refresh_timer))
     
     # Add message handler for non-command messages
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
