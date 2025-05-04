@@ -86,6 +86,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"/start - Show this help message\n"
         f"/change [schedule_name] [minutes] - Update frequency of a schedule\n"
         f"/create [schedule_name] [minutes] - Create a new schedule\n"
+        f"/delete [schedule_name] - Delete a schedule\n"
         f"/list - List all schedules\n"
         f"/all - Show detailed timing for all schedules\n"
         f"/send [schedule_name] - Send a test notification from a schedule"
@@ -199,6 +200,59 @@ async def create_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error creating schedule: {e}")
         await update.message.reply_text(f"Error creating schedule: {e}")
 
+async def delete_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Delete an existing schedule."""
+    global config
+    
+    try:
+        # Check args: /delete schedule_name
+        if not context.args:
+            await update.message.reply_text(
+                "Please provide a schedule name to delete.\n"
+                "Example: /delete dance"
+            )
+            return
+            
+        # Get the name (can be multiple words)
+        schedule_name = " ".join(context.args).lower()
+            
+        # Check if schedule exists
+        if schedule_name not in config["schedules"]:
+            await update.message.reply_text(
+                f"Schedule '{schedule_name}' not found. Available schedules:\n" +
+                "\n".join([f"• {name}" for name in config["schedules"].keys()])
+            )
+            return
+            
+        # Don't allow deleting the last schedule
+        if len(config["schedules"]) <= 1:
+            await update.message.reply_text(
+                f"Cannot delete the last remaining schedule '{schedule_name}'.\n"
+                f"Create a new schedule first before deleting this one."
+            )
+            return
+            
+        # Delete the schedule
+        deleted_schedule = config["schedules"].pop(schedule_name)
+        config["last_updated"] = datetime.now().isoformat()
+        save_config(config)
+        
+        await update.message.reply_text(
+            f"Schedule '{schedule_name}' has been deleted."
+        )
+        
+        # Also send a notification to the original chat ID
+        await context.bot.send_message(
+            chat_id=CHAT_ID,
+            text=f"Schedule '{schedule_name}' has been deleted from your notifications."
+        )
+        
+        logger.info(f"Schedule '{schedule_name}' has been deleted")
+        
+    except Exception as e:
+        logger.error(f"Error deleting schedule: {e}")
+        await update.message.reply_text(f"Error deleting schedule: {e}")
+
 async def list_schedules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all schedules."""
     try:
@@ -294,6 +348,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/start - Show help information\n"
         "/change [schedule_name] [minutes] - Update frequency of a schedule\n"
         "/create [schedule_name] [minutes] - Create a new schedule\n"
+        "/delete [schedule_name] - Delete a schedule\n"
         "/list - List all schedules\n"
         "/all - Show detailed timing for all schedules\n"
         "/send [schedule_name] - Send a test notification from a schedule"
@@ -308,6 +363,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("change", change_frequency))
     application.add_handler(CommandHandler("create", create_schedule))
+    application.add_handler(CommandHandler("delete", delete_schedule))
     application.add_handler(CommandHandler("list", list_schedules))
     application.add_handler(CommandHandler("all", all_schedules))
     application.add_handler(CommandHandler("send", send_message))
