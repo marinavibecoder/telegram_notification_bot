@@ -89,6 +89,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"/delete [schedule_name] - Delete a schedule\n"
         f"/list - List all schedules\n"
         f"/all - Show detailed timing for all schedules\n"
+        f"/timer [schedule_name] - Show time until next notification\n"
         f"/send [schedule_name] - Send a test notification from a schedule"
     )
 
@@ -310,6 +311,51 @@ async def all_schedules(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error showing all schedules: {e}")
         await update.message.reply_text(f"Error showing all schedules: {e}")
 
+async def timer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show time until next notification for a specific schedule."""
+    try:
+        # Check if schedule name is provided
+        if not context.args:
+            await update.message.reply_text(
+                "Please provide a schedule name.\n"
+                "Example: /timer basic"
+            )
+            return
+            
+        # Get the schedule name
+        schedule_name = " ".join(context.args).lower()
+        
+        # Check if schedule exists
+        if schedule_name not in config["schedules"]:
+            await update.message.reply_text(
+                f"Schedule '{schedule_name}' not found. Available schedules:\n" +
+                "\n".join([f"• {name}" for name in config["schedules"].keys()])
+            )
+            return
+            
+        # Get the schedule
+        schedule = config["schedules"][schedule_name]
+        frequency_minutes = schedule["frequency_minutes"]
+        last_updated = datetime.fromisoformat(schedule["last_updated"])
+        
+        # Calculate next notification time
+        now = datetime.now()
+        minutes_since_update = (now - last_updated).total_seconds() / 60
+        minutes_until_next = frequency_minutes - (minutes_since_update % frequency_minutes)
+        next_notification = now + timedelta(minutes=minutes_until_next)
+        
+        # Format the message
+        message = f"⏱️ Timer for '{schedule_name}':\n\n"
+        message += f"• Next notification in: {int(minutes_until_next)} minutes\n"
+        message += f"• Exact time: {next_notification.strftime('%H:%M:%S')}\n"
+        message += f"• Message that will be sent: \"{schedule['message']}\""
+        
+        await update.message.reply_text(message)
+        
+    except Exception as e:
+        logger.error(f"Error showing timer: {e}")
+        await update.message.reply_text(f"Error showing timer: {e}")
+
 async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a test message from a specific schedule."""
     try:
@@ -351,6 +397,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/delete [schedule_name] - Delete a schedule\n"
         "/list - List all schedules\n"
         "/all - Show detailed timing for all schedules\n"
+        "/timer [schedule_name] - Show time until next notification\n"
         "/send [schedule_name] - Send a test notification from a schedule"
     )
 
@@ -366,6 +413,7 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/delete [schedule_name] - Delete a schedule\n"
         "/list - List all schedules with their messages\n"
         "/all - Show detailed timing information for all schedules\n"
+        "/timer [schedule_name] - Show time until next notification\n"
         "/send [schedule_name] - Send a test notification from a schedule"
     )
 
@@ -382,6 +430,7 @@ def main():
     application.add_handler(CommandHandler("list", list_schedules))
     application.add_handler(CommandHandler("all", all_schedules))
     application.add_handler(CommandHandler("send", send_message))
+    application.add_handler(CommandHandler("timer", timer_command))
     
     # Add message handler for non-command messages
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
