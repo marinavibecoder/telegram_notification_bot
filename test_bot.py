@@ -34,7 +34,7 @@ async def main():
         logger.info(f"   Replace <YOUR_TOKEN> with your actual token")
         logger.info(f"   Full URL: https://api.telegram.org/bot{TOKEN}/getUpdates")
         logger.info("4. Look for 'chat':{'id': YOUR_CHAT_ID} in the response")
-        logger.info("5. Copy that ID and use it in your telegram_bot.py file")
+        logger.info("5. Copy that ID and use it in your .env file as TELEGRAM_CHAT_ID")
         
     except Exception as e:
         logger.error(f"Error during test: {e}")

@@ -2,19 +2,29 @@
     "schedules": {
         "basic": {
             "frequency_minutes": 40,
-            "last_updated": "2025-05-04T13:00:40.694527",
+            "last_updated": "2025-05-18T15:55:15.884557",
             "message": "Hi Marina, you are a nice vibe coder don't forget it haha"
         },
         "dream": {
             "frequency_minutes": 180,
-            "last_updated": "2025-05-04T20:51:32.898549",
+            "last_updated": "2025-05-18T16:13:47.913278",
             "message": "Hi Marina, don't forget your dream!"
         },
         "eat a candy": {
             "frequency_minutes": 55,
-            "last_updated": "2025-05-04T21:22:42.758857",
+            "last_updated": "2025-05-18T15:55:15.884557",
             "message": "Hi Marina, don't forget your eat a candy!"
+        },
+        "fast": {
+            "frequency_minutes": 270,
+            "last_updated": "2025-05-18T14:58:27.959621",
+            "message": "Hi Marina, don't forget your fast!"
+        },
+        "fast7": {
+            "frequency_minutes": 360,
+            "last_updated": "2025-05-18T13:08:44.361737",
+            "message": "Hi Marina, don't forget your fast7!"
         }
     },
-    "last_updated": "2025-05-04T21:22:42.758857"
+    "last_updated": "2025-05-18T16:13:47.913278"
 }

@@ -30,6 +30,7 @@ CONFIG_FILE = 'config.json'
 # Global variables for application and scheduler
 application = None
 scheduler = None
+BOT_STATE_FILE = 'bot_state.json'
 
 def load_config():
     """Load configuration from config file."""
@@ -73,8 +74,34 @@ def save_config(config):
     except Exception as e:
         logger.error(f"Error saving config: {e}")
 
+def load_bot_state():
+    """Load bot state from file."""
+    try:
+        if os.path.exists(BOT_STATE_FILE):
+            with open(BOT_STATE_FILE, 'r') as f:
+                return json.load(f)
+        else:
+            # Default state is stopped
+            state = {"is_running": False}
+            save_bot_state(state)
+            return state
+    except Exception as e:
+        logger.error(f"Error loading bot state: {e}")
+        return {"is_running": False}
+
+def save_bot_state(state):
+    """Save bot state to file."""
+    try:
+        with open(BOT_STATE_FILE, 'w') as f:
+            json.dump(state, f, indent=4)
+    except Exception as e:
+        logger.error(f"Error saving bot state: {e}")
+
 # Load initial config
 config = load_config()
+
+# Load initial bot state
+bot_state = load_bot_state()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a message when the command /start is issued."""
@@ -470,7 +497,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/all - Show detailed timing for all schedules\n"
         "/timer [schedule_name] - Show time until next notification\n"
         "/refresh [schedule_name] - Reset timer to start from now\n"
-        "/send [schedule_name] - Send a test notification from a schedule"
+        "/send [schedule_name] - Send a test notification from a schedule\n"
+        "/control [start|stop] - Start or stop the bot\n"
+        "/status - Show current bot status"
     )
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -487,7 +516,9 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/all - Show detailed timing information for all schedules\n"
         "/timer [schedule_name] - Show time until next notification\n"
         "/refresh [schedule_name] - Reset timer to start from now\n"
-        "/send [schedule_name] - Send a test notification from a schedule"
+        "/send [schedule_name] - Send a test notification from a schedule\n"
+        "/control [start|stop] - Start or stop the bot\n"
+        "/status - Show current bot status"
     )
 
 async def send_scheduled_notification(schedule_name):
@@ -559,6 +590,84 @@ def update_scheduler_jobs():
     except Exception as e:
         logger.error(f"Error updating scheduler jobs: {e}")
 
+async def control_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Control the bot's state (start/stop)."""
+    global bot_state, scheduler
+    
+    try:
+        if not context.args:
+            await update.message.reply_text(
+                "Please specify an action: start or stop\n"
+                "Example: /control start"
+            )
+            return
+            
+        action = context.args[0].lower()
+        
+        if action not in ['start', 'stop']:
+            await update.message.reply_text(
+                "Invalid action. Use 'start' or 'stop'.\n"
+                "Example: /control start"
+            )
+            return
+            
+        if action == 'start' and bot_state["is_running"]:
+            await update.message.reply_text("Bot is already running!")
+            return
+            
+        if action == 'stop' and not bot_state["is_running"]:
+            await update.message.reply_text("Bot is already stopped!")
+            return
+            
+        if action == 'start':
+            # Start the scheduler if it's not running
+            if not scheduler or not scheduler.running:
+                scheduler = AsyncIOScheduler()
+                update_scheduler_jobs()
+                scheduler.start()
+                logger.info("Scheduler started")
+            
+            bot_state["is_running"] = True
+            save_bot_state(bot_state)
+            await update.message.reply_text("✅ Bot has been started!")
+            logger.info("Bot started by user command")
+            
+        else:  # stop
+            if scheduler and scheduler.running:
+                scheduler.shutdown()
+                logger.info("Scheduler stopped")
+            
+            bot_state["is_running"] = False
+            save_bot_state(bot_state)
+            await update.message.reply_text("🛑 Bot has been stopped!")
+            logger.info("Bot stopped by user command")
+            
+    except Exception as e:
+        logger.error(f"Error controlling bot: {e}")
+        await update.message.reply_text(f"Error controlling bot: {e}")
+
+async def bot_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show the current status of the bot."""
+    status = "running" if bot_state["is_running"] else "stopped"
+    status_emoji = "✅" if bot_state["is_running"] else "🛑"
+    
+    message = f"Bot Status: {status_emoji} {status.upper()}\n\n"
+    
+    if bot_state["is_running"]:
+        message += "Active schedules:\n"
+        for name, schedule in config["schedules"].items():
+            last_updated = datetime.fromisoformat(schedule["last_updated"])
+            now = datetime.now()
+            minutes_since_update = (now - last_updated).total_seconds() / 60
+            minutes_until_next = schedule["frequency_minutes"] - (minutes_since_update % schedule["frequency_minutes"])
+            next_notification = now + timedelta(minutes=minutes_until_next)
+            
+            message += f"• {name}: next notification in {int(minutes_until_next)} minutes ({next_notification.strftime('%H:%M:%S')})\n"
+    else:
+        message += "Bot is currently stopped. Use /control start to start it."
+    
+    await update.message.reply_text(message)
+
 def main():
     """Start the bot."""
     global application, scheduler
@@ -576,6 +685,8 @@ def main():
     application.add_handler(CommandHandler("send", send_message))
     application.add_handler(CommandHandler("timer", timer_command))
     application.add_handler(CommandHandler("refresh", refresh_timer))
+    application.add_handler(CommandHandler("control", control_bot))
+    application.add_handler(CommandHandler("status", bot_status))
     
     # Add message handler for non-command messages
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
@@ -583,16 +694,16 @@ def main():
     # Add unknown command handler - this must be added last!
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
 
-    # Create scheduler with the event loop from the application
+    # Create scheduler but don't start it automatically
     scheduler = AsyncIOScheduler()
     
-    # Initialize scheduler jobs
-    update_scheduler_jobs()
-    
-    # Start the scheduler
-    scheduler.start()
-    
-    logger.info("Bot started with scheduler for all configured schedules")
+    # Only start the scheduler if the bot was running before
+    if bot_state["is_running"]:
+        update_scheduler_jobs()
+        scheduler.start()
+        logger.info("Bot started with scheduler for all configured schedules")
+    else:
+        logger.info("Bot started in stopped state")
 
     # Run the bot until the user presses Ctrl-C
     application.run_polling(allowed_updates=Update.ALL_TYPES)

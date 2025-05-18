@@ -1,6 +1,6 @@
 # Telegram Notification Bot
 
-A simple Telegram bot that sends scheduled notifications.
+A Telegram bot that sends scheduled notifications with support for multiple independent schedules.
 
 ## Setup
 
@@ -15,31 +15,43 @@ A simple Telegram bot that sends scheduled notifications.
      python3 test_bot.py
      ```
    - Follow the instructions to get your chat ID
-   - Open `telegram_bot.py` and update the `CHAT_ID` variable with your chat ID
+   - Create a `.env` file with your credentials:
+     ```
+     TELEGRAM_TOKEN=your_bot_token_here
+     TELEGRAM_CHAT_ID=your_chat_id_here
+     ```
 
 3. Start the bot:
    ```
-   python3 telegram_bot.py
+   python3 simple_interactive_bot.py
    ```
 
-## Customizing Notifications
+## Available Commands
 
-Edit the `telegram_bot.py` file to change the notification schedule:
+The bot supports the following commands:
 
-- For interval-based notifications, modify:
-  ```python
-  scheduler.add_job(send_notification, 'interval', hours=1)
-  ```
+- `/start` - Show help information and current schedules
+- `/change [schedule_name] [minutes]` - Update frequency of a schedule
+- `/create [schedule_name] [minutes]` - Create a new schedule
+- `/delete [schedule_name]` - Delete a schedule
+- `/list` - List all schedules with their messages
+- `/all` - Show detailed timing information for all schedules
+- `/timer [schedule_name]` - Show time until next notification
+- `/refresh [schedule_name]` - Reset timer to start from now
+- `/send [schedule_name]` - Send a test notification from a schedule
 
-- For scheduled notifications at specific times, uncomment and modify:
-  ```python
-  scheduler.add_job(lambda: asyncio.create_task(send_notification("Daily reminder!")), 'cron', hour=9, minute=0)
-  ```
+## Schedule Management
 
-## APScheduler Options
+Each schedule can have:
+- A custom name
+- Its own frequency (in minutes)
+- A custom notification message
+- Independent timing
 
-- **Interval**: Run jobs at fixed intervals (seconds, minutes, hours, days, weeks)
-- **Cron**: Run jobs at specific times, similar to Unix cron
-- **Date**: Run jobs once at a specific date and time
+The bot will automatically manage multiple schedules and send notifications according to each schedule's frequency.
+
+## Configuration
+
+Schedules are stored in `config.json`. The bot will create this file automatically with a default schedule if it doesn't exist.
 
 For more information on scheduling options, visit the [APScheduler documentation](https://apscheduler.readthedocs.io/en/stable/userguide.html). 
