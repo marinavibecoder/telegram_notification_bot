@@ -4,11 +4,15 @@ import json
 import logging
 from datetime import datetime, timedelta
 import time
+import threading
+import sys
+import signal
+import psutil
+import subprocess
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from dotenv import load_dotenv
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Load environment variables from .env file
 load_dotenv()
@@ -20,6 +24,35 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Function to check for running instances and handle them
+def check_for_running_instances():
+    """Check if there's already a running instance of this bot and handle it."""
+    # First check if we have a PID file
+    pid_file = "bot_pid.txt"
+    if os.path.exists(pid_file):
+        try:
+            with open(pid_file, 'r') as f:
+                old_pid = int(f.read().strip())
+            
+            # Check if process with this PID exists
+            if psutil.pid_exists(old_pid):
+                process = psutil.Process(old_pid)
+                # Check if it's a Python process
+                if "python" in process.name().lower():
+                    logger.info(f"Found running bot instance with PID {old_pid}. Stopping it.")
+                    # Send SIGTERM to gracefully stop the process
+                    os.kill(old_pid, signal.SIGTERM)
+                    # Wait for it to stop
+                    time.sleep(2)
+        except Exception as e:
+            logger.warning(f"Error checking for existing bot instance: {e}")
+    
+    # Write current PID to file
+    with open(pid_file, 'w') as f:
+        f.write(str(os.getpid()))
+    
+    logger.info(f"Started new bot instance with PID {os.getpid()}")
+
 # Bot Configuration
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '105453726')
@@ -29,7 +62,7 @@ CONFIG_FILE = 'config.json'
 
 # Global variables for application and scheduler
 application = None
-scheduler = None
+stop_threads = False  # Flag to control the scheduler thread
 BOT_STATE_FILE = 'bot_state.json'
 
 def load_config():
@@ -54,7 +87,6 @@ def load_config():
             return config
     except Exception as e:
         logger.error(f"Error loading config: {e}")
-        # Return default config if there's an error
         return {
             "schedules": {
                 "basic": {
@@ -102,6 +134,126 @@ config = load_config()
 
 # Load initial bot state
 bot_state = load_bot_state()
+
+def get_time_slot(dt):
+    """Get the 10-minute time slot for a given datetime.
+    Returns a tuple of (slot_start, slot_end) where both are datetime objects.
+    Slots start at XX:00, XX:10, XX:20, etc."""
+    # Round down to the nearest 10 minutes
+    minutes = (dt.minute // 10) * 10
+    slot_start = dt.replace(minute=minutes, second=1, microsecond=0)
+    slot_end = slot_start + timedelta(minutes=10)
+    return slot_start, slot_end
+
+def get_next_slot_start():
+    """Get the start time of the next 10-minute slot."""
+    now = datetime.now()
+    slot_start, _ = get_time_slot(now)
+    if now >= slot_start:
+        slot_start += timedelta(minutes=10)
+    return slot_start
+
+def scheduler_thread():
+    """Thread function to check and send scheduled notifications."""
+    logger.info("Scheduler thread started")
+    last_slot_start = None
+    
+    while not stop_threads:
+        try:
+            now = datetime.now()
+            current_slot_start, current_slot_end = get_time_slot(now)
+            
+            # Only process at the start of a new slot (first second)
+            if last_slot_start != current_slot_start and now.second < 2:
+                logger.info(f"Processing slot starting at {current_slot_start.strftime('%H:%M:%S')}")
+                last_slot_start = current_slot_start
+                
+                # Collect all schedules that need notification in this slot
+                slot_notifications = []
+                
+                for name, schedule in config["schedules"].items():
+                    try:
+                        frequency_minutes = schedule["frequency_minutes"]
+                        last_updated = datetime.fromisoformat(schedule["last_updated"])
+                        
+                        # Calculate when the next notification should be
+                        next_notification = last_updated + timedelta(minutes=frequency_minutes)
+                        
+                        # If the next notification falls within the current 10-minute slot
+                        if current_slot_start <= next_notification < current_slot_end:
+                            logger.info(f"Schedule '{name}' needs notification in slot {current_slot_start.strftime('%H:%M')}-{current_slot_end.strftime('%H:%M')}")
+                            slot_notifications.append({
+                                "name": name,
+                                "message": schedule["message"],
+                                "frequency": frequency_minutes,
+                                "next_time": next_notification
+                            })
+                            
+                            # Update the last_updated timestamp
+                            config["schedules"][name]["last_updated"] = now.isoformat()
+                            config["last_updated"] = now.isoformat()
+                            
+                    except Exception as e:
+                        logger.error(f"Error processing schedule '{name}': {e}")
+                
+                # If we have any notifications for this slot, send them as one consolidated message
+                if slot_notifications:
+                    try:
+                        # Sort notifications by their scheduled time
+                        slot_notifications.sort(key=lambda x: x["next_time"])
+                        
+                        # Create consolidated message
+                        slot_time = current_slot_start.strftime('%H:%M')
+                        consolidated_message = f"📅 Notifications for {slot_time}-{(current_slot_start + timedelta(minutes=10)).strftime('%H:%M')}\n\n"
+                        
+                        for notification in slot_notifications:
+                            scheduled_time = notification["next_time"].strftime('%H:%M:%S')
+                            consolidated_message += f"• {notification['message']}\n"
+                            consolidated_message += f"  (From schedule: {notification['name']}, every {notification['frequency']} minutes, scheduled for {scheduled_time})\n\n"
+                        
+                        # Send the consolidated message
+                        success = send_telegram_message(consolidated_message)
+                        
+                        if success:
+                            save_config(config)
+                            logger.info(f"Consolidated notification sent for {len(slot_notifications)} schedules in slot {slot_time}")
+                        else:
+                            logger.error("Failed to send consolidated notification")
+                            
+                    except Exception as e:
+                        logger.error(f"Error sending consolidated notification: {e}")
+            
+            # Sleep until next second
+            next_second = now.replace(microsecond=0) + timedelta(seconds=1)
+            sleep_seconds = (next_second - now).total_seconds()
+            time.sleep(max(0.1, sleep_seconds))  # Sleep at least 0.1 seconds
+                
+        except Exception as e:
+            logger.error(f"Error in scheduler thread: {e}")
+            time.sleep(5)  # Sleep briefly on error to prevent tight loop
+
+def send_telegram_message(message):
+    """Send a message to Telegram using HTTP API directly."""
+    import requests
+    
+    try:
+        logger.info(f"Sending Telegram message: {message[:50]}...")
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        data = {
+            "chat_id": CHAT_ID,
+            "text": message
+        }
+        
+        response = requests.post(url, data=data, timeout=10)  # Add timeout
+        if response.status_code == 200:
+            logger.info("Telegram message sent successfully!")
+            return True
+        else:
+            logger.error(f"Failed to send message: Status {response.status_code} - {response.text}")
+            return False
+    except Exception as e:
+        logger.error(f"Error sending Telegram message: {e}")
+        return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a message when the command /start is issued."""
@@ -160,9 +312,6 @@ async def change_frequency(update: Update, context: ContextTypes.DEFAULT_TYPE):
         config["last_updated"] = datetime.now().isoformat()
         save_config(config)
         
-        # Update scheduler
-        update_scheduler_jobs()
-        
         await update.message.reply_text(
             f"Schedule '{schedule_name}' updated to every {minutes} minutes.\n"
             f"Next notification will arrive in {minutes} minutes."
@@ -220,9 +369,6 @@ async def create_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         config["last_updated"] = datetime.now().isoformat()
         save_config(config)
         
-        # Update scheduler
-        update_scheduler_jobs()
-        
         await update.message.reply_text(
             f"New schedule '{schedule_name}' created with {minutes} minute frequency.\n"
             f"Message: \"{custom_message}\""
@@ -276,9 +422,6 @@ async def delete_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         deleted_schedule = config["schedules"].pop(schedule_name)
         config["last_updated"] = datetime.now().isoformat()
         save_config(config)
-        
-        # Update scheduler
-        update_scheduler_jobs()
         
         await update.message.reply_text(
             f"Schedule '{schedule_name}' has been deleted."
@@ -428,24 +571,16 @@ async def refresh_timer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         config["last_updated"] = now.isoformat()
         save_config(config)
         
-        # Update scheduler
-        update_scheduler_jobs()
-        
-        # Get the schedule frequency
-        frequency_minutes = config["schedules"][schedule_name]["frequency_minutes"]
-        next_notification = now + timedelta(minutes=frequency_minutes)
-        
-        # Format the message
-        message = f"🔄 Timer for '{schedule_name}' has been refreshed!\n\n"
-        message += f"• Next notification will be in {frequency_minutes} minutes\n"
-        message += f"• Exact time: {next_notification.strftime('%H:%M:%S')}"
-        
-        await update.message.reply_text(message)
+        await update.message.reply_text(
+            f"🔄 Timer for '{schedule_name}' has been refreshed!\n\n"
+            f"• Next notification will be in {config['schedules'][schedule_name]['frequency_minutes']} minutes\n"
+            f"• Exact time: {now.strftime('%H:%M:%S')}"
+        )
         
         # Also send a notification to the original chat ID
         await context.bot.send_message(
             chat_id=CHAT_ID,
-            text=f"Schedule '{schedule_name}' timer has been refreshed. Next notification in {frequency_minutes} minutes."
+            text=f"Schedule '{schedule_name}' timer has been refreshed. Next notification in {config['schedules'][schedule_name]['frequency_minutes']} minutes."
         )
         
         logger.info(f"Schedule '{schedule_name}' timer has been refreshed")
@@ -521,74 +656,20 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/status - Show current bot status"
     )
 
-async def send_scheduled_notification(schedule_name):
-    """Send a notification for a specific schedule."""
-    try:
-        if schedule_name not in config["schedules"]:
-            logger.error(f"Schedule '{schedule_name}' not found in config!")
-            return
-
-        # Get schedule info
-        schedule = config["schedules"][schedule_name]
-        logger.info(f"Sending scheduled notification for '{schedule_name}' (every {schedule['frequency_minutes']} minutes)")
-            
-        # Get schedule-specific message
-        message = schedule["message"]
-        
-        # Add time to message
-        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        full_message = f"{message}\n\nTime: {current_time}\n(From schedule: {schedule_name})"
-        
-        # Send the message
-        await application.bot.send_message(chat_id=CHAT_ID, text=full_message)
-        logger.info(f"Scheduled notification for '{schedule_name}' sent successfully")
-        
-        # Update the last_updated timestamp
-        config["schedules"][schedule_name]["last_updated"] = datetime.now().isoformat()
-        config["last_updated"] = datetime.now().isoformat()
-        save_config(config)
-        
-    except Exception as e:
-        logger.error(f"Error sending scheduled notification for '{schedule_name}': {e}")
-
-def update_scheduler_jobs():
-    """Update scheduler jobs based on the current config."""
-    global scheduler
+def signal_handler(sig, frame):
+    """Handle signals (like SIGTERM, SIGINT) to ensure clean shutdown."""
+    logger.info(f"Received signal {sig}, shutting down...")
+    global stop_threads, application
     
-    try:
-        # Remove all existing jobs
-        for job in scheduler.get_jobs():
-            job.remove()
-            
-        # Add a job for each schedule
-        for schedule_name, schedule in config["schedules"].items():
-            frequency_minutes = schedule["frequency_minutes"]
-            
-            # Calculate next run time based on last_updated
-            last_updated = datetime.fromisoformat(schedule["last_updated"])
-            now = datetime.now()
-            minutes_since_update = (now - last_updated).total_seconds() / 60
-            minutes_until_next = frequency_minutes - (minutes_since_update % frequency_minutes)
-            
-            # If minutes_until_next is very small, add a minute to avoid immediate trigger
-            if minutes_until_next < 1:
-                minutes_until_next = 1
-                
-            next_run = now + timedelta(minutes=minutes_until_next)
-            
-            logger.info(f"Scheduling '{schedule_name}' to run every {frequency_minutes} minutes (next run at {next_run.strftime('%H:%M:%S')})")
-            
-            # Add job with the calculated next run time
-            scheduler.add_job(
-                send_scheduled_notification,
-                'interval',
-                minutes=frequency_minutes,
-                next_run_time=next_run,
-                id=f'schedule_{schedule_name}',
-                args=[schedule_name]
-            )
-    except Exception as e:
-        logger.error(f"Error updating scheduler jobs: {e}")
+    # Stop scheduler thread
+    stop_threads = True
+    
+    # Stop application if it's running
+    if application:
+        application.stop()
+    
+    # Exit
+    sys.exit(0)
 
 async def control_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Control the bot's state (start/stop)."""
@@ -668,9 +749,34 @@ async def bot_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(message)
 
+def reset_all_schedules():
+    """Reset all schedule timestamps to current time."""
+    global config
+    now = datetime.now().isoformat()
+    for schedule in config["schedules"].values():
+        schedule["last_updated"] = now
+    config["last_updated"] = now
+    save_config(config)
+    logger.info("All schedule timestamps have been reset to current time")
+
 def main():
     """Start the bot."""
-    global application, scheduler
+    global application, stop_threads
+    
+    # Set up signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Check for and handle any existing bot instances
+    check_for_running_instances()
+    
+    # Reset all schedule timestamps to current time
+    reset_all_schedules()
+    
+    # Create and start scheduler thread
+    scheduler = threading.Thread(target=scheduler_thread)
+    scheduler.daemon = True  # Thread will exit when main program exits
+    scheduler.start()
     
     # Create the Application
     application = Application.builder().token(TOKEN).build()
@@ -694,28 +800,22 @@ def main():
     # Add unknown command handler - this must be added last!
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
 
-    # Create scheduler but don't start it automatically
-    scheduler = AsyncIOScheduler()
+    logger.info("Bot started with scheduler thread for all configured schedules")
     
-    # Only start the scheduler if the bot was running before
-    if bot_state["is_running"]:
-        update_scheduler_jobs()
-        scheduler.start()
-        logger.info("Bot started with scheduler for all configured schedules")
-    else:
-        logger.info("Bot started in stopped state")
-
-    # Run the bot until the user presses Ctrl-C
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    try:
+        # Run the bot until the user presses Ctrl-C
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
+    finally:
+        # Stop the scheduler thread when the bot is stopped
+        stop_threads = True
+        logger.info("Bot stopping, waiting for threads to finish...")
+        scheduler.join(timeout=5)
+        logger.info("Threads stopped, bot shutdown complete")
 
 if __name__ == "__main__":
     try:
         main()
-    except (KeyboardInterrupt, SystemExit):
+    except KeyboardInterrupt:
         logger.info("Bot stopped by user!")
-        if scheduler and scheduler.running:
-            scheduler.shutdown()
     except Exception as e:
-        logger.error(f"Bot error: {e}")
-        if scheduler and scheduler.running:
-            scheduler.shutdown() 
+        logger.error(f"Bot error: {e}") 
