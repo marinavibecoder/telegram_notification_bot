@@ -13,6 +13,7 @@ import subprocess
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from dotenv import load_dotenv
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Load environment variables from .env file
 load_dotenv()
@@ -160,6 +161,11 @@ def scheduler_thread():
     
     while not stop_threads:
         try:
+            # Only process notifications if bot is running
+            if not bot_state["is_running"]:
+                time.sleep(1)  # Sleep briefly when bot is stopped
+                continue
+                
             now = datetime.now()
             current_slot_start, current_slot_end = get_time_slot(now)
             
@@ -673,7 +679,7 @@ def signal_handler(sig, frame):
 
 async def control_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Control the bot's state (start/stop)."""
-    global bot_state, scheduler
+    global bot_state
     
     try:
         if not context.args:
@@ -701,26 +707,15 @@ async def control_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
             
         if action == 'start':
-            # Start the scheduler if it's not running
-            if not scheduler or not scheduler.running:
-                scheduler = AsyncIOScheduler()
-                update_scheduler_jobs()
-                scheduler.start()
-                logger.info("Scheduler started")
-            
             bot_state["is_running"] = True
             save_bot_state(bot_state)
-            await update.message.reply_text("✅ Bot has been started!")
+            await update.message.reply_text("✅ Bot has been started! Notifications will resume.")
             logger.info("Bot started by user command")
             
         else:  # stop
-            if scheduler and scheduler.running:
-                scheduler.shutdown()
-                logger.info("Scheduler stopped")
-            
             bot_state["is_running"] = False
             save_bot_state(bot_state)
-            await update.message.reply_text("🛑 Bot has been stopped!")
+            await update.message.reply_text("🛑 Bot has been stopped! No more notifications will be sent.")
             logger.info("Bot stopped by user command")
             
     except Exception as e:

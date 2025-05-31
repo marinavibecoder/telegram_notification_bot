@@ -50,4 +50,11 @@ bot_error.log
 *.swo
 
 # Environment variables
-.env.local 
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store 
